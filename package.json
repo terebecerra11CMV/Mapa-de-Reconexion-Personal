@@ -1,0 +1,9 @@
+{
+  "name": "mapa-de-reconexion-personal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mapa de Reconexión Personal - Código Maestro de Vida (Tere Becerra Huerta)",
+  "dependencies": {
+    "@upstash/redis": "^1.34.3"
+  }
+}

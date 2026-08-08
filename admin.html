@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Generador de enlaces — Mapa de Reconexión Personal™</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .admin-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px 20px;}
+  .admin-card{width:100%;max-width:560px;}
+  .admin-list{margin-top:28px;text-align:left;}
+  .admin-item{
+    background:#fff;border-radius:14px;padding:14px 16px;margin-bottom:10px;
+    box-shadow:var(--shadow-card);display:flex;align-items:center;justify-content:space-between;gap:10px;
+  }
+  .admin-item .link-text{font-size:13px;color:var(--text);word-break:break-all;}
+  .admin-item .link-name{font-size:12px;color:var(--text-secondary);margin-bottom:3px;}
+  .copy-btn{
+    flex:0 0 auto;background:var(--purple);color:#fff;border-radius:100px;padding:8px 14px;
+    font-size:12.5px;font-weight:600;transition:background 0.25s;
+  }
+  .copy-btn.copied{background:var(--turquoise-d);}
+  .admin-note{font-size:12.5px;color:var(--text-secondary);margin-top:22px;text-align:left;line-height:1.6;}
+</style>
+</head>
+<body>
+<div class="bg-glow"></div>
+<div class="admin-wrap">
+  <div class="form-card admin-card">
+    <div class="form-eyebrow">Código Maestro de Vida™ · Panel privado</div>
+    <h1 style="font-size:28px;">Generador de Enlaces</h1>
+    <p class="form-sub">Crea un link único de un solo uso para cada clienta.</p>
+
+    <div class="field">
+      <label for="clientName">Nombre de la clienta (opcional, solo para identificarlo)</label>
+      <input type="text" id="clientName" placeholder="Ej. María Fernanda">
+    </div>
+    <button type="button" class="btn-generate" id="genBtn">✨ Generar Enlace Único</button>
+
+    <div class="admin-list" id="linkList"></div>
+
+    <p class="admin-note">
+      Cada enlace generado aquí funciona <strong>una sola vez</strong>: en cuanto la persona genere su Mapa,
+      el mismo link deja de funcionar automáticamente (verificado en el servidor, no se puede saltar borrando caché
+      ni usando modo incógnito). Copia el link y envíalo por WhatsApp, email o donde prefieras.
+      Esta página es privada — no la compartas ni la publiques.
+    </p>
+  </div>
+</div>
+
+<script>
+(function () {
+  function stripAccents(s) {
+    var out = "";
+    for (var i = 0; i < s.length; i++) {
+      var code = s.charCodeAt(i);
+      // Rango Unicode de marcas diacríticas combinantes: U+0300–U+036F
+      if (code >= 768 && code <= 879) continue;
+      out += s.charAt(i);
+    }
+    return out;
+  }
+
+  function slugify(s) {
+    return stripAccents((s || "").toString().normalize("NFD"))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24);
+  }
+
+  function randomSuffix() {
+    return Math.random().toString(36).slice(2, 6) + Date.now().toString(36).slice(-3);
+  }
+
+  var list = document.getElementById("linkList");
+
+  function addLinkCard(name, token) {
+    var url = window.location.origin + "/?token=" + encodeURIComponent(token);
+    var item = document.createElement("div");
+    item.className = "admin-item";
+    item.innerHTML =
+      '<div>' +
+        '<div class="link-name">' + (name ? name : "Sin nombre") + '</div>' +
+        '<div class="link-text">' + url + '</div>' +
+      '</div>' +
+      '<button type="button" class="copy-btn">Copiar</button>';
+    var btn = item.querySelector(".copy-btn");
+    btn.addEventListener("click", function () {
+      navigator.clipboard.writeText(url).then(function () {
+        btn.textContent = "¡Copiado!";
+        btn.classList.add("copied");
+        setTimeout(function () { btn.textContent = "Copiar"; btn.classList.remove("copied"); }, 1800);
+      });
+    });
+    list.insertBefore(item, list.firstChild);
+  }
+
+  document.getElementById("genBtn").addEventListener("click", function () {
+    var nameInput = document.getElementById("clientName");
+    var name = nameInput.value.trim();
+    var slug = slugify(name);
+    var token = (slug ? slug + "-" : "") + randomSuffix();
+    addLinkCard(name, token);
+    nameInput.value = "";
+  });
+})();
+</script>
+</body>
+</html>

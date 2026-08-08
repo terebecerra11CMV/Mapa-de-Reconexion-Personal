@@ -1,0 +1,65 @@
+<div class="bg-glow"></div>
+
+<section id="gateScreen">
+  <div class="form-card" id="gateCard">
+    <svg class="mandala" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="32" cy="32" r="30" stroke="#8B85CA" stroke-width="1" opacity="0.5"/>
+      <circle cx="32" cy="32" r="21" stroke="#E7BBD7" stroke-width="1" opacity="0.6"/>
+      <circle cx="32" cy="14" r="9" stroke="#AFE2E3" stroke-width="1" opacity="0.7"/>
+      <circle cx="32" cy="50" r="9" stroke="#AFE2E3" stroke-width="1" opacity="0.7"/>
+      <circle cx="14" cy="32" r="9" stroke="#F3EFA1" stroke-width="1" opacity="0.7"/>
+      <circle cx="50" cy="32" r="9" stroke="#F3EFA1" stroke-width="1" opacity="0.7"/>
+      <circle cx="32" cy="32" r="4" fill="#8B85CA" opacity="0.8"/>
+    </svg>
+    <div class="form-eyebrow">Código Maestro de Vida™</div>
+    <h1 id="gateTitle">Verificando tu acceso…</h1>
+    <p class="form-sub" id="gateMessage">Un momento, por favor.</p>
+  </div>
+</section>
+
+<section id="formScreen" class="hidden">
+  <div class="form-card">
+    <svg class="mandala" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="32" cy="32" r="30" stroke="#8B85CA" stroke-width="1" opacity="0.5"/>
+      <circle cx="32" cy="32" r="21" stroke="#E7BBD7" stroke-width="1" opacity="0.6"/>
+      <circle cx="32" cy="14" r="9" stroke="#AFE2E3" stroke-width="1" opacity="0.7"/>
+      <circle cx="32" cy="50" r="9" stroke="#AFE2E3" stroke-width="1" opacity="0.7"/>
+      <circle cx="14" cy="32" r="9" stroke="#F3EFA1" stroke-width="1" opacity="0.7"/>
+      <circle cx="50" cy="32" r="9" stroke="#F3EFA1" stroke-width="1" opacity="0.7"/>
+      <circle cx="32" cy="32" r="4" fill="#8B85CA" opacity="0.8"/>
+    </svg>
+    <div class="form-eyebrow">Código Maestro de Vida™</div>
+    <h1>Mapa de Reconexión<br>Personal™</h1>
+    <p class="form-sub">Tu viaje de regreso a casa comienza con una respiración.</p>
+
+    <form id="mapForm" novalidate>
+      <div class="field">
+        <label for="fullName">Nombre completo</label>
+        <input type="text" id="fullName" name="fullName" placeholder="Ej. María Fernanda López García" autocomplete="name">
+        <div class="field-error" id="errName">Por favor escribe tu nombre completo.</div>
+      </div>
+      <div class="field">
+        <label for="birthDate">Fecha de nacimiento</label>
+        <input type="text" id="birthDate" name="birthDate" placeholder="DD/MM/AAAA" inputmode="numeric" maxlength="10" autocomplete="bday">
+        <div class="field-error" id="errDate">Ingresa una fecha válida en formato DD/MM/AAAA.</div>
+      </div>
+      <button type="submit" class="btn-generate">✨ Generar Mi Mapa Personal</button>
+    </form>
+    <div class="form-notice">⚠️ <strong>Importante:</strong> este enlace es válido para un solo uso. Revisa bien tu nombre y fecha de nacimiento antes de presionar "Generar" — si los datos se ingresan de forma incorrecta, el enlace quedará usado y perderás el acceso a tu Mapa.</div>
+    <div class="form-footnote">Elaborado con amor por Tere Becerra Huerta · Coach Holística Empresarial</div>
+  </div>
+</section>
+
+<section id="appScreen" class="hidden">
+  <div class="app-header">
+    <div class="brand">Código Maestro de Vida™</div>
+    <h1 class="app-title">Mapa de Reconexión Personal™</h1>
+    <div class="client-name" id="headerClientName"></div>
+  </div>
+
+  <nav class="tab-nav" id="tabNav"></nav>
+
+  <div class="progress-track" id="progressTrack"></div>
+
+  <div class="tab-panels" id="tabPanels"></div>
+</section>
