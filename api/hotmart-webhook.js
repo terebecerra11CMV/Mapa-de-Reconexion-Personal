@@ -77,7 +77,6 @@ export default async function handler(req, res) {
 
   const body = parseBody(req);
 
-  // Por ahora solamente nos interesa una compra aprobada.
   if (body.event !== "PURCHASE_APPROVED") {
     return res.status(200).json({
       ok: true,
@@ -103,8 +102,6 @@ export default async function handler(req, res) {
   try {
     const purchaseKey = `hotmart-purchase:${transaction}`;
 
-    // Idempotencia:
-    // si Hotmart reenvía el mismo webhook, no generamos otro acceso.
     const existingRaw = await redis.get(purchaseKey);
     const existing = parseStored(existingRaw);
 
@@ -155,14 +152,11 @@ export default async function handler(req, res) {
       mapBirthDate: null,
     };
 
-    // Guardamos el registro principal de la compra.
     await redis.set(
       purchaseKey,
       JSON.stringify(record)
     );
 
-    // Índice inverso:
-    // nos permite saber qué compra corresponde a un token.
     await redis.set(
       `mapa-access:${token}`,
       JSON.stringify({
