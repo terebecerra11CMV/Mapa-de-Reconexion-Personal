@@ -59,8 +59,6 @@ export default async function handler(req, res) {
   try {
     const usedAt = new Date().toISOString();
 
-    // Mantiene exactamente el comportamiento original:
-    // el primer uso gana y cualquier segundo intento falla.
     const tokenRecord = JSON.stringify({
       usedAt,
       fullName: fullName || null,
@@ -80,8 +78,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Si este token provino de una compra de Hotmart,
-    // buscamos la compra asociada.
     try {
       const accessRaw = await redis.get(`mapa-access:${token}`);
       const access = parseStored(accessRaw);
@@ -103,8 +99,6 @@ export default async function handler(req, res) {
         }
       }
     } catch (linkErr) {
-      // No bloqueamos la generación del mapa si falla
-      // solamente el enriquecimiento del registro.
       console.error(
         "[redeem-token] No se pudo actualizar compra Hotmart:",
         linkErr
