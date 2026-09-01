@@ -51,6 +51,100 @@ function createToken(seed) {
   );
 }
 
+async function savePurchase(
+  purchaseKey,
+  record
+) {
+  await redis.set(
+    purchaseKey,
+    JSON.stringify(record)
+  );
+}
+
+async function sendToHotmartSend(record) {
+  const sendUrl = (
+    process.env.HOTMART_SEND_URL || ""
+  ).trim();
+
+  const sendHottok = (
+    process.env.HOTMART_SEND_HOTTOK || ""
+  ).trim();
+
+  /*
+   * Permitimos desplegar el código incluso
+   * antes de que Tere termine Vercel.
+   */
+  if (!sendUrl || !sendHottok) {
+    return {
+      ok: false,
+      configured: false,
+      reason: "send_not_configured",
+    };
+  }
+
+  if (!record.buyerEmail) {
+    return {
+      ok: false,
+      configured: true,
+      reason: "missing_email",
+    };
+  }
+
+  const response = await fetch(
+    sendUrl,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/json",
+      },
+
+      body: JSON.stringify({
+        email:
+          record.buyerEmail,
+
+        hottok:
+          sendHottok,
+
+        first_name:
+          record.buyerFirstName ||
+          record.buyerName ||
+          "",
+
+        last_name:
+          record.buyerLastName ||
+          "",
+
+        /*
+         * ESTE es el enlace individual
+         * que luego Hotmart Send inserta
+         * como %Subscriber:website%.
+         */
+        website:
+          record.accessUrl,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const responseText =
+      await response.text();
+
+    throw new Error(
+      "Hotmart Send HTTP " +
+      response.status +
+      " " +
+      responseText
+    );
+  }
+
+  return {
+    ok: true,
+    configured: true,
+  };
+}
+
 export default async function handler(
   req,
   res
@@ -68,11 +162,8 @@ export default async function handler(
   }
 
   /*
-   * Protección mínima para lanzamiento.
-   * Hotmart envía este header en sus webhooks.
-   *
-   * Luego podemos endurecer la autenticación
-   * validando el secreto completo.
+   * Por ahora mantenemos la validación
+   * mínima que ya probamos con Hotmart.
    */
   const hottokHeader = (
     req.headers["x-hotmart-hottok"] || ""
@@ -99,18 +190,24 @@ export default async function handler(
     });
   }
 
-  const data = body.data || {};
-  const purchase = data.purchase || {};
-  const buyer = data.buyer || {};
-  const product = data.product || {};
+  const data =
+    body.data || {};
+
+  const purchase =
+    data.purchase || {};
+
+  const buyer =
+    data.buyer || {};
+
+  const product =
+    data.product || {};
 
   const productId =
     Number(product.id || 0);
 
   /*
-   * Permitimos:
-   * - producto REAL
-   * - payload oficial de prueba de Hotmart
+   * Hotmart usa product.id = 0
+   * en su payload oficial de prueba.
    */
   const isHotmartTest =
     productId === 0 &&
@@ -138,7 +235,8 @@ export default async function handler(
       ignored: true,
       reason:
         "purchase_not_approved",
-      status: purchase.status,
+      status:
+        purchase.status,
     });
   }
 
@@ -149,36 +247,40 @@ export default async function handler(
     .trim();
 
   const email =
-    normalizeEmail(buyer.email);
+    normalizeEmail(
+      buyer.email
+    );
 
   if (!transaction) {
     return res.status(400).json({
       ok: false,
-      reason: "missing_transaction",
+      reason:
+        "missing_transaction",
     });
   }
 
   if (!email) {
     return res.status(400).json({
       ok: false,
-      reason: "missing_buyer_email",
+      reason:
+        "missing_buyer_email",
     });
   }
 
   try {
     /*
-     * Hotmart reutiliza la misma
-     * transacción en los payloads
-     * de prueba.
+     * Para compras reales:
+     * transacción = token determinístico.
      *
-     * body.id permite que cada
-     * prueba genere un acceso nuevo.
+     * Para pruebas:
+     * Hotmart reutiliza la transacción,
+     * así que usamos body.id para generar
+     * una prueba distinta cada vez.
      */
-    const seed = isHotmartTest
-      ? `${transaction}:${
-          body.id || Date.now()
-        }`
-      : transaction;
+    const seed =
+      isHotmartTest
+        ? `${transaction}:${body.id || Date.now()}`
+        : transaction;
 
     const purchaseKey =
       isHotmartTest
@@ -191,137 +293,226 @@ export default async function handler(
         : `hotmart-purchase:${transaction}`;
 
     const existingRaw =
-      await redis.get(purchaseKey);
-
-    const existing =
-      parseStored(existingRaw);
-
-    /*
-     * Si Hotmart reintenta la misma
-     * compra real no creamos otro token.
-     */
-    if (
-      existing &&
-      existing.accessUrl
-    ) {
-      await redis.set(
-        `mapa-buyer:${email}`,
+      await redis.get(
         purchaseKey
       );
 
-      return res.status(200).json({
-        ok: true,
-        duplicate: true,
+    let record =
+      parseStored(
+        existingRaw
+      );
+
+    /*
+     * Generamos el acceso solamente
+     * si esta compra no existía.
+     */
+    if (
+      !record ||
+      !record.accessUrl
+    ) {
+      const token =
+        createToken(seed);
+
+      const accessUrl =
+        `${MAP_BASE_URL}/?token=${encodeURIComponent(
+          token
+        )}`;
+
+      record = {
+        source: "hotmart",
         test: isHotmartTest,
+
+        webhookEventId:
+          body.id || null,
+
+        event:
+          body.event,
+
         transaction,
-        token: existing.token,
-        accessUrl:
-          existing.accessUrl,
-      });
+
+        productId,
+
+        productName:
+          product.name || null,
+
+        buyerName:
+          buyer.name || null,
+
+        buyerFirstName:
+          buyer.first_name || null,
+
+        buyerLastName:
+          buyer.last_name || null,
+
+        buyerEmail:
+          email,
+
+        buyerPhone:
+          buyer.checkout_phone ||
+          null,
+
+        buyerPhoneCode:
+          buyer.checkout_phone_code ||
+          null,
+
+        purchaseStatus:
+          purchase.status || null,
+
+        purchaseDate:
+          purchase.approved_date ||
+          purchase.order_date ||
+          null,
+
+        token,
+        accessUrl,
+
+        createdAt:
+          new Date().toISOString(),
+
+        sendStatus:
+          "pending",
+
+        sendDeliveredAt:
+          null,
+
+        sendLastError:
+          null,
+
+        mapUsed:
+          false,
+
+        mapUsedAt:
+          null,
+
+        mapFullName:
+          null,
+
+        mapBirthDate:
+          null,
+      };
+
+      await savePurchase(
+        purchaseKey,
+        record
+      );
+
+      /*
+       * token -> compra
+       */
+      await redis.set(
+        `mapa-access:${token}`,
+        JSON.stringify({
+          transaction,
+          purchaseKey,
+        })
+      );
     }
 
-    const token =
-      createToken(seed);
-
-    const accessUrl =
-      `${MAP_BASE_URL}/?token=${encodeURIComponent(
-        token
-      )}`;
-
-    const record = {
-      source: "hotmart",
-      test: isHotmartTest,
-
-      webhookEventId:
-        body.id || null,
-
-      event:
-        body.event,
-
-      transaction,
-
-      productId,
-
-      productName:
-        product.name || null,
-
-      buyerName:
-        buyer.name || null,
-
-      buyerFirstName:
-        buyer.first_name || null,
-
-      buyerLastName:
-        buyer.last_name || null,
-
-      buyerEmail:
-        email,
-
-      buyerPhone:
-        buyer.checkout_phone || null,
-
-      buyerPhoneCode:
-        buyer.checkout_phone_code ||
-        null,
-
-      purchaseStatus:
-        purchase.status || null,
-
-      purchaseDate:
-        purchase.approved_date ||
-        purchase.order_date ||
-        null,
-
-      token,
-      accessUrl,
-
-      createdAt:
-        new Date().toISOString(),
-
-      mapUsed:
-        false,
-
-      mapUsedAt:
-        null,
-    };
-
     /*
-     * Registro principal de la compra.
-     */
-    await redis.set(
-      purchaseKey,
-      JSON.stringify(record)
-    );
-
-    /*
-     * Token -> compra.
-     */
-    await redis.set(
-      `mapa-access:${token}`,
-      JSON.stringify({
-        transaction,
-        purchaseKey,
-      })
-    );
-
-    /*
-     * Email -> compra más reciente.
-     *
-     * Esto permite recuperar el link
-     * simplemente usando el correo
-     * utilizado en Hotmart.
+     * email -> compra.
+     * También alimenta acceso.html,
+     * nuestro mecanismo de recuperación.
      */
     await redis.set(
       `mapa-buyer:${email}`,
       purchaseKey
     );
 
+    /*
+     * Entrega automática a Hotmart Send.
+     *
+     * Si ya se entregó antes,
+     * NO mandamos un segundo email.
+     */
+    if (!record.sendDeliveredAt) {
+      try {
+        const sendResult =
+          await sendToHotmartSend(
+            record
+          );
+
+        if (
+          sendResult.configured &&
+          sendResult.ok
+        ) {
+          record.sendStatus =
+            "delivered_to_hotmart_send";
+
+          record.sendDeliveredAt =
+            new Date().toISOString();
+
+          record.sendLastError =
+            null;
+        } else {
+          /*
+           * Tere aún no puso las variables.
+           * No rompemos la compra.
+           */
+          record.sendStatus =
+            sendResult.reason ||
+            "pending_configuration";
+        }
+
+        await savePurchase(
+          purchaseKey,
+          record
+        );
+      } catch (sendError) {
+        /*
+         * Guardamos el error para soporte.
+         */
+        record.sendStatus =
+          "failed";
+
+        record.sendLastError =
+          sendError.message ||
+          "unknown_error";
+
+        await savePurchase(
+          purchaseKey,
+          record
+        );
+
+        console.error(
+          "[hotmart-webhook-live] Hotmart Send:",
+          sendError
+        );
+
+        /*
+         * Devolvemos error para que una
+         * compra real no quede silenciosamente
+         * sin intentar entregar nuevamente.
+         */
+        return res.status(502).json({
+          ok: false,
+          reason:
+            "hotmart_send_failed",
+          transaction,
+          accessUrl:
+            record.accessUrl,
+        });
+      }
+    }
+
     return res.status(200).json({
       ok: true,
-      test: isHotmartTest,
+
+      test:
+        isHotmartTest,
+
+      duplicate:
+        Boolean(existingRaw),
+
       transaction,
-      token,
-      accessUrl,
+
+      token:
+        record.token,
+
+      accessUrl:
+        record.accessUrl,
+
+      sendStatus:
+        record.sendStatus,
     });
   } catch (err) {
     console.error(
