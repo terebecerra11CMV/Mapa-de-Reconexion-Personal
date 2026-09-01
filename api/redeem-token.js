@@ -17,10 +17,7 @@ function parseStored(value) {
   }
 }
 
-export default async function handler(
-  req,
-  res
-) {
+export default async function handler(req, res) {
   res.setHeader(
     "Cache-Control",
     "no-store"
@@ -29,8 +26,7 @@ export default async function handler(
   if (req.method !== "POST") {
     return res.status(405).json({
       ok: false,
-      reason:
-        "method_not_allowed",
+      reason: "method_not_allowed"
     });
   }
 
@@ -38,30 +34,26 @@ export default async function handler(
 
   if (typeof body === "string") {
     try {
-      body =
-        JSON.parse(body);
+      body = JSON.parse(body);
     } catch {
       body = {};
     }
   }
 
   const token = (
-    (body && body.token) ||
-    ""
+    (body && body.token) || ""
   )
     .toString()
     .trim();
 
   const fullName = (
-    (body && body.fullName) ||
-    ""
+    (body && body.fullName) || ""
   )
     .toString()
     .trim();
 
   const birthDate = (
-    (body && body.birthDate) ||
-    ""
+    (body && body.birthDate) || ""
   )
     .toString()
     .trim();
@@ -69,108 +61,132 @@ export default async function handler(
   if (!token) {
     return res.status(400).json({
       ok: false,
-      reason: "missing_token",
+      reason: "missing_token"
     });
   }
 
   try {
+    let access = null;
+    let purchase = null;
+
+    /*
+     * TOKENS HOTMART:
+     * antes de permitir el canje comprobamos
+     * que realmente hayan sido creados
+     * por nuestro webhook.
+     */
+    if (token.startsWith("hm-")) {
+      const accessRaw = await redis.get(
+        `mapa-access:${token}`
+      );
+
+      access = parseStored(accessRaw);
+
+      if (!access || !access.purchaseKey) {
+        return res.status(403).json({
+          ok: false,
+          reason: "invalid_token"
+        });
+      }
+
+      const purchaseRaw = await redis.get(
+        access.purchaseKey
+      );
+
+      purchase = parseStored(
+        purchaseRaw
+      );
+
+      if (!purchase) {
+        return res.status(403).json({
+          ok: false,
+          reason: "invalid_purchase"
+        });
+      }
+
+      /*
+       * Segunda línea de defensa.
+       */
+      if (purchase.mapUsed === true) {
+        return res.status(409).json({
+          ok: false,
+          reason: "used"
+        });
+      }
+    }
+
     const usedAt =
       new Date().toISOString();
 
     /*
-     * El primer intento gana.
-     * El segundo ya no puede utilizar
-     * este acceso.
+     * CANDADO REAL.
+     *
+     * SETNX es explícitamente:
+     * "crear solamente si todavía no existe".
+     *
+     * 1 = nosotros fuimos el primer uso.
+     * 0 = alguien ya consumió este token.
      */
-    const claimed =
-      await redis.set(
-        tokenKey(token),
-
-        JSON.stringify({
-          usedAt,
-
-          fullName:
-            fullName || null,
-
-          birthDate:
-            birthDate || null,
-        }),
-
-        {
-          nx: true,
-        }
-      );
+    const claimed = await redis.setnx(
+      `mapa-redeemed:${token}`,
+      JSON.stringify({
+        usedAt,
+        fullName:
+          fullName || null,
+        birthDate:
+          birthDate || null
+      })
+    );
 
     if (!claimed) {
       return res.status(409).json({
         ok: false,
-        reason: "used",
+        reason: "used"
       });
     }
 
     /*
-     * Si este token fue creado por
-     * una compra de Hotmart,
-     * actualizamos esa misma compra.
+     * También mantenemos la llave antigua
+     * para compatibilidad con el sistema.
      */
-    try {
-      const accessRaw =
-        await redis.get(
-          `mapa-access:${token}`
-        );
+    await redis.set(
+      tokenKey(token),
+      JSON.stringify({
+        usedAt,
+        fullName:
+          fullName || null,
+        birthDate:
+          birthDate || null
+      })
+    );
 
-      const access =
-        parseStored(accessRaw);
+    /*
+     * Actualizamos el registro de compra.
+     */
+    if (
+      access &&
+      access.purchaseKey &&
+      purchase
+    ) {
+      purchase.mapUsed = true;
+      purchase.mapUsedAt = usedAt;
 
-      if (
-        access &&
-        access.purchaseKey
-      ) {
-        const purchaseRaw =
-          await redis.get(
-            access.purchaseKey
-          );
+      purchase.mapFullName =
+        fullName || null;
 
-        const purchase =
-          parseStored(
-            purchaseRaw
-          );
+      purchase.mapBirthDate =
+        birthDate || null;
 
-        if (purchase) {
-          purchase.mapUsed =
-            true;
-
-          purchase.mapUsedAt =
-            usedAt;
-
-          purchase.mapFullName =
-            fullName || null;
-
-          purchase.mapBirthDate =
-            birthDate || null;
-
-          await redis.set(
-            access.purchaseKey,
-            JSON.stringify(
-              purchase
-            )
-          );
-        }
-      }
-    } catch (recordError) {
-      /*
-       * Si falla únicamente el registro,
-       * NO bloqueamos el Mapa.
-       */
-      console.error(
-        "[redeem-token] purchase update:",
-        recordError
+      await redis.set(
+        access.purchaseKey,
+        JSON.stringify(purchase)
       );
     }
 
     return res.status(200).json({
-      ok: true,
+      ok: true
     });
+
   } catch (err) {
     console.error(
       "[redeem-token] error:",
@@ -179,7 +195,7 @@ export default async function handler(
 
     return res.status(500).json({
       ok: false,
-      reason: "error",
+      reason: "error"
     });
   }
 }
