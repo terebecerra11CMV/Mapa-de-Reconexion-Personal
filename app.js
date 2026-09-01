@@ -86,12 +86,16 @@
       });
   }
 
-  function redeemToken() {
-    return fetch("/api/redeem-token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: state.token })
+  function redeemToken(fullName, birthDate) {
+  return fetch("/api/redeem-token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      token: state.token,
+      fullName: fullName,
+      birthDate: birthDate
     })
+  })
       .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
       .then(function (res) {
         return !!(res.data && res.data.ok);
@@ -197,7 +201,7 @@
     var originalBtnText = submitBtn.textContent;
     submitBtn.textContent = "Verificando tu acceso…";
 
-    redeemToken().then(function (success) {
+    redeemToken(name, dateStr).then(function (success) {
       if (!success) {
         showGate(
           "Este enlace ya fue utilizado",
