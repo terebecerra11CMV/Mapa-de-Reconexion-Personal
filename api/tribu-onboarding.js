@@ -3,9 +3,17 @@ import { redis } from "./_redis.js";
 const TRIBU_URL =
   "https://chat.whatsapp.com/Ii2vVa48CINBfiyxS4KL7r";
 
+const VALID_SCHEDULES = [
+  "09:00_CDMX",
+  "20:00_CDMX",
+];
+
 function parseStored(value) {
   if (!value) return null;
-  if (typeof value === "object") return value;
+
+  if (typeof value === "object") {
+    return value;
+  }
 
   try {
     return JSON.parse(value);
@@ -22,11 +30,18 @@ function clean(value, max = 500) {
 }
 
 function normalizeEmail(email) {
-  return clean(email, 200).toLowerCase();
+  return clean(email, 200)
+    .toLowerCase();
 }
 
-export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "no-store");
+export default async function handler(
+  req,
+  res
+) {
+  res.setHeader(
+    "Cache-Control",
+    "no-store"
+  );
 
   if (req.method !== "POST") {
     return res.status(405).json({
@@ -45,32 +60,63 @@ export default async function handler(req, res) {
     }
   }
 
-  const email =
-    normalizeEmail(body && body.email);
-
   const fullName =
-    clean(body && body.fullName, 180);
+    clean(
+      body && body.fullName,
+      180
+    );
+
+  const email =
+    normalizeEmail(
+      body && body.email
+    );
 
   const whatsapp =
-    clean(body && body.whatsapp, 60);
+    clean(
+      body && body.whatsapp,
+      60
+    );
 
   const country =
-    clean(body && body.country, 100);
+    clean(
+      body && body.country,
+      120
+    );
+
+  const purchaseDate =
+    clean(
+      body && body.purchaseDate,
+      30
+    );
 
   const expectation =
-    clean(body && body.expectation, 1200);
+    clean(
+      body && body.expectation,
+      1200
+    );
+
+  const liveSchedule =
+    clean(
+      body && body.liveSchedule,
+      80
+    );
 
   const acceptedAgreements =
     Boolean(
-      body && body.acceptedAgreements
+      body &&
+      body.acceptedAgreements
     );
 
   const acceptedData =
     Boolean(
-      body && body.acceptedData
+      body &&
+      body.acceptedData
     );
 
-  if (!email || !email.includes("@")) {
+  if (
+    !email ||
+    !email.includes("@")
+  ) {
     return res.status(400).json({
       ok: false,
       reason: "invalid_email",
@@ -81,11 +127,24 @@ export default async function handler(req, res) {
     !fullName ||
     !whatsapp ||
     !country ||
-    !expectation
+    !purchaseDate ||
+    !expectation ||
+    !liveSchedule
   ) {
     return res.status(400).json({
       ok: false,
       reason: "missing_fields",
+    });
+  }
+
+  if (
+    !VALID_SCHEDULES.includes(
+      liveSchedule
+    )
+  ) {
+    return res.status(400).json({
+      ok: false,
+      reason: "invalid_schedule",
     });
   }
 
@@ -95,11 +154,17 @@ export default async function handler(req, res) {
   ) {
     return res.status(400).json({
       ok: false,
-      reason: "agreements_required",
+      reason:
+        "agreements_required",
     });
   }
 
   try {
+    /*
+     * Solo puede avanzar quien
+     * tenga una compra aprobada
+     * registrada por nuestro webhook.
+     */
     const purchaseKeyRaw =
       await redis.get(
         `mapa-buyer:${email}`
@@ -108,25 +173,32 @@ export default async function handler(req, res) {
     if (!purchaseKeyRaw) {
       return res.status(404).json({
         ok: false,
-        reason: "purchase_not_found",
+        reason:
+          "purchase_not_found",
       });
     }
 
     const purchaseKey =
-      typeof purchaseKeyRaw === "string"
+      typeof purchaseKeyRaw ===
+      "string"
         ? purchaseKeyRaw
         : purchaseKeyRaw.toString();
 
     const purchaseRaw =
-      await redis.get(purchaseKey);
+      await redis.get(
+        purchaseKey
+      );
 
     const purchase =
-      parseStored(purchaseRaw);
+      parseStored(
+        purchaseRaw
+      );
 
     if (!purchase) {
       return res.status(404).json({
         ok: false,
-        reason: "purchase_not_found",
+        reason:
+          "purchase_not_found",
       });
     }
 
@@ -138,19 +210,44 @@ export default async function handler(req, res) {
       email,
       whatsapp,
       country,
+
+      /*
+       * Fecha indicada por
+       * la propia compradora.
+       */
+      purchaseDate,
+
       expectation,
+      liveSchedule,
+
       acceptedAgreements,
       acceptedData,
+
       submittedAt,
+
       transaction:
-        purchase.transaction || null,
+        purchase.transaction ||
+        null,
+
+      source:
+        "tribu_onboarding",
     };
 
+    /*
+     * Registro independiente
+     * por correo.
+     */
     await redis.set(
       `tribu-onboarding:${email}`,
-      JSON.stringify(onboarding)
+      JSON.stringify(
+        onboarding
+      )
     );
 
+    /*
+     * También lo dejamos dentro
+     * del registro de compra.
+     */
     purchase.tribuOnboarding =
       onboarding;
 
@@ -159,13 +256,17 @@ export default async function handler(req, res) {
 
     await redis.set(
       purchaseKey,
-      JSON.stringify(purchase)
+      JSON.stringify(
+        purchase
+      )
     );
 
     return res.status(200).json({
       ok: true,
-      tribeUrl: TRIBU_URL,
+      tribeUrl:
+        TRIBU_URL,
     });
+
   } catch (error) {
     console.error(
       "[tribu-onboarding] error:",
@@ -174,7 +275,8 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
       ok: false,
-      reason: "internal_error",
+      reason:
+        "internal_error",
     });
   }
 }
