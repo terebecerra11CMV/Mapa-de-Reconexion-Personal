@@ -17,7 +17,139 @@ function parseStored(value) {
   }
 }
 
-export default async function handler(req, res) {
+function splitFullName(fullName) {
+  const parts = (fullName || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return {
+      firstName: "",
+      lastName: ""
+    };
+  }
+
+  if (parts.length === 1) {
+    return {
+      firstName: parts[0],
+      lastName: ""
+    };
+  }
+
+  /*
+   * No podemos conocer con 100% de certeza
+   * dónde terminan los nombres y empiezan
+   * los apellidos.
+   *
+   * Para Send usamos:
+   * primera palabra = nombre
+   * resto = apellido(s)
+   *
+   * El nombre COMPLETO original se sigue
+   * guardando íntegro en Redis.
+   */
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" ")
+  };
+}
+
+async function syncCompletedDataToHotmartSend({
+  email,
+  fullName,
+  birthDate,
+  accessUrl
+}) {
+  const sendUrl = (
+    process.env.HOTMART_SEND_PROFILE_URL || ""
+  ).trim();
+
+  const sendHottok = (
+    process.env.HOTMART_SEND_PROFILE_HOTTOK || ""
+  ).trim();
+
+  if (!sendUrl || !sendHottok) {
+    return {
+      ok: false,
+      configured: false,
+      reason: "profile_send_not_configured"
+    };
+  }
+
+  if (!email) {
+    return {
+      ok: false,
+      configured: true,
+      reason: "missing_email"
+    };
+  }
+
+  const {
+    firstName,
+    lastName
+  } = splitFullName(fullName);
+
+  const response = await fetch(
+    sendUrl,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/json"
+      },
+
+      body: JSON.stringify({
+        email,
+        hottok: sendHottok,
+
+        first_name:
+          firstName,
+
+        last_name:
+          lastName,
+
+        /*
+         * Hotmart Send utiliza Birthday /
+         * Fecha de nacimiento como campo
+         * estándar del contacto.
+         */
+        birthday:
+          birthDate || "",
+
+        /*
+         * Conservamos también el link
+         * individual del Mapa.
+         */
+        website:
+          accessUrl || ""
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const responseText =
+      await response.text();
+
+    throw new Error(
+      "Hotmart Send profile HTTP " +
+      response.status +
+      " " +
+      responseText
+    );
+  }
+
+  return {
+    ok: true,
+    configured: true
+  };
+}
+
+export default async function handler(
+  req,
+  res
+) {
   res.setHeader(
     "Cache-Control",
     "no-store"
@@ -70,32 +202,34 @@ export default async function handler(req, res) {
     let purchase = null;
 
     /*
-     * TOKENS HOTMART:
-     * antes de permitir el canje comprobamos
-     * que realmente hayan sido creados
-     * por nuestro webhook.
+     * Validamos tokens emitidos por Hotmart.
      */
     if (token.startsWith("hm-")) {
-      const accessRaw = await redis.get(
-        `mapa-access:${token}`
-      );
+      const accessRaw =
+        await redis.get(
+          `mapa-access:${token}`
+        );
 
-      access = parseStored(accessRaw);
+      access =
+        parseStored(accessRaw);
 
-      if (!access || !access.purchaseKey) {
+      if (
+        !access ||
+        !access.purchaseKey
+      ) {
         return res.status(403).json({
           ok: false,
           reason: "invalid_token"
         });
       }
 
-      const purchaseRaw = await redis.get(
-        access.purchaseKey
-      );
+      const purchaseRaw =
+        await redis.get(
+          access.purchaseKey
+        );
 
-      purchase = parseStored(
-        purchaseRaw
-      );
+      purchase =
+        parseStored(purchaseRaw);
 
       if (!purchase) {
         return res.status(403).json({
@@ -104,9 +238,6 @@ export default async function handler(req, res) {
         });
       }
 
-      /*
-       * Segunda línea de defensa.
-       */
       if (purchase.mapUsed === true) {
         return res.status(409).json({
           ok: false,
@@ -119,24 +250,19 @@ export default async function handler(req, res) {
       new Date().toISOString();
 
     /*
-     * CANDADO REAL.
-     *
-     * SETNX es explícitamente:
-     * "crear solamente si todavía no existe".
-     *
-     * 1 = nosotros fuimos el primer uso.
-     * 0 = alguien ya consumió este token.
+     * Candado de un solo uso.
      */
-    const claimed = await redis.setnx(
-      `mapa-redeemed:${token}`,
-      JSON.stringify({
-        usedAt,
-        fullName:
-          fullName || null,
-        birthDate:
-          birthDate || null
-      })
-    );
+    const claimed =
+      await redis.setnx(
+        `mapa-redeemed:${token}`,
+        JSON.stringify({
+          usedAt,
+          fullName:
+            fullName || null,
+          birthDate:
+            birthDate || null
+        })
+      );
 
     if (!claimed) {
       return res.status(409).json({
@@ -146,8 +272,7 @@ export default async function handler(req, res) {
     }
 
     /*
-     * También mantenemos la llave antigua
-     * para compatibilidad con el sistema.
+     * Compatibilidad con la llave anterior.
      */
     await redis.set(
       tokenKey(token),
@@ -161,7 +286,8 @@ export default async function handler(req, res) {
     );
 
     /*
-     * Actualizamos el registro de compra.
+     * Actualizamos compra + sincronizamos
+     * datos completados con Hotmart Send.
      */
     if (
       access &&
@@ -169,13 +295,84 @@ export default async function handler(req, res) {
       purchase
     ) {
       purchase.mapUsed = true;
-      purchase.mapUsedAt = usedAt;
+
+      purchase.mapUsedAt =
+        usedAt;
 
       purchase.mapFullName =
         fullName || null;
 
       purchase.mapBirthDate =
         birthDate || null;
+
+      purchase.mapProfileSyncStatus =
+        "pending";
+
+      purchase.mapProfileSyncedAt =
+        null;
+
+      purchase.mapProfileSyncError =
+        null;
+
+      /*
+       * Primero persistimos Redis.
+       * La generación del Mapa NO depende
+       * de que Hotmart Send responda bien.
+       */
+      await redis.set(
+        access.purchaseKey,
+        JSON.stringify(purchase)
+      );
+
+      try {
+        const syncResult =
+          await syncCompletedDataToHotmartSend({
+            email:
+              purchase.buyerEmail,
+
+            fullName,
+
+            birthDate,
+
+            accessUrl:
+              purchase.accessUrl
+          });
+
+        if (
+          syncResult.configured &&
+          syncResult.ok
+        ) {
+          purchase.mapProfileSyncStatus =
+            "synced_to_hotmart_send";
+
+          purchase.mapProfileSyncedAt =
+            new Date().toISOString();
+
+          purchase.mapProfileSyncError =
+            null;
+        } else {
+          purchase.mapProfileSyncStatus =
+            syncResult.reason ||
+            "pending_configuration";
+        }
+      } catch (syncError) {
+        /*
+         * IMPORTANTE:
+         * si Send falla, NO rompemos
+         * el Mapa de la clienta.
+         */
+        purchase.mapProfileSyncStatus =
+          "failed";
+
+        purchase.mapProfileSyncError =
+          syncError.message ||
+          "unknown_error";
+
+        console.error(
+          "[redeem-token] Hotmart Send profile sync:",
+          syncError
+        );
+      }
 
       await redis.set(
         access.purchaseKey,
