@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  />
+
+  <meta
+    name="robots"
+    content="noindex,nofollow"
+  />
+
+  <title>Acceso a Tribu Diseñadas por Dios™</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+
+      font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
+
+      color: #393544;
+
+      background:
+        radial-gradient(
+          circle at top left,
+          rgba(139,133,202,.18),
+          transparent 35%
+        ),
+        radial-gradient(
+          circle at bottom right,
+          rgba(255,205,218,.28),
+          transparent 35%
+        ),
+        #faf9f7;
+    }
+
+    .wrap {
+      width: min(100%, 680px);
+      margin: 30px auto;
+    }
+
+    .card {
+      background:
+        rgba(255,255,255,.96);
+
+      border:
+        1px solid
+        rgba(139,133,202,.16);
+
+      border-radius: 28px;
+
+      padding: 38px 32px;
+
+      box-shadow:
+        0 24px 70px
+        rgba(49,43,72,.10);
+    }
+
+    .eyebrow {
+      text-align: center;
+      font-size: 12px;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      color: #756fc1;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      text-align: center;
+
+      font-family:
+        Georgia,
+        "Times New Roman",
+        serif;
+
+      font-size:
+        clamp(30px, 6vw, 44px);
+
+      line-height: 1.1;
+      color: #292534;
+    }
+
+    .intro {
+      text-align: center;
+      line-height: 1.65;
+      color: #696374;
+      margin-bottom: 30px;
+    }
+
+    .field {
+      margin-bottom: 18px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      border: 1px solid #d9d5e5;
+      border-radius: 14px;
+      padding: 14px 15px;
+      font-size: 16px;
+      outline: none;
+      background: #fff;
+    }
+
+    textarea {
+      min-height: 110px;
+      resize: vertical;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: #8b85ca;
+
+      box-shadow:
+        0 0 0 4px
+        rgba(139,133,202,.11);
+    }
+
+    .check {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 15px 0;
+      line-height: 1.45;
+      font-size: 14px;
+    }
+
+    .check input {
+      width: auto;
+      margin-top: 3px;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 12px;
+
+      border: 0;
+      border-radius: 999px;
+
+      padding: 16px 20px;
+
+      font-size: 16px;
+      font-weight: 700;
+
+      color: #fff;
+
+      background:
+        linear-gradient(
+          135deg,
+          #756fc1,
+          #c984ad
+        );
+
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: .6;
+      cursor: wait;
+    }
+
+    .message {
+      display: none;
+      margin-top: 16px;
+      padding: 13px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .message.show {
+      display: block;
+    }
+
+    .message.error {
+      background: #fff1f1;
+      color: #943939;
+    }
+
+    .message.success {
+      background: #effaf4;
+      color: #2d7750;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 22px;
+      color: #817b8a;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <main class="wrap">
+    <section class="card">
+
+      <div class="eyebrow">
+        Diseñadas por Dios™
+      </div>
+
+      <h1>
+        Antes de entrar a la Tribu 💜
+      </h1>
+
+      <p class="intro">
+        Queremos conocerte un poquito mejor
+        para que este espacio pueda acompañarte
+        de una manera más cercana e intencional.
+      </p>
+
+      <form id="tribuForm">
+
+        <div class="field">
+          <label for="fullName">
+            Nombre completo
+          </label>
+
+          <input
+            id="fullName"
+            type="text"
+            autocomplete="name"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label for="email">
+            Correo utilizado en tu compra
+          </label>
+
+          <input
+            id="email"
+            type="email"
+            autocomplete="email"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label for="whatsapp">
+            Número de WhatsApp
+          </label>
+
+          <input
+            id="whatsapp"
+            type="tel"
+            autocomplete="tel"
+            placeholder="+52..."
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label for="country">
+            País / ciudad
+          </label>
+
+          <input
+            id="country"
+            type="text"
+            placeholder="México, CDMX"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label for="expectation">
+            ¿Qué esperas encontrar en la Tribu?
+          </label>
+
+          <textarea
+            id="expectation"
+            required
+          ></textarea>
+        </div>
+
+        <label class="check">
+          <input
+            id="agreements"
+            type="checkbox"
+            required
+          />
+
+          <span>
+            He leído y acepto participar
+            desde el respeto, la confidencialidad
+            y el propósito de la comunidad.
+          </span>
+        </label>
+
+        <label class="check">
+          <input
+            id="dataConsent"
+            type="checkbox"
+            required
+          />
+
+          <span>
+            Autorizo el tratamiento de esta
+            información para gestionar mi
+            participación en la Tribu.
+          </span>
+        </label>
+
+        <button
+          id="submitBtn"
+          type="submit"
+        >
+          CONTINUAR A MI TRIBU
+        </button>
+
+        <div
+          id="message"
+          class="message"
+        ></div>
+
+      </form>
+
+    </section>
+
+    <div class="footer">
+      Tribu Diseñadas por Dios™ ·
+      Creadas con amor ·
+      Formadas con intención
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var form =
+        document.getElementById(
+          "tribuForm"
+        );
+
+      var button =
+        document.getElementById(
+          "submitBtn"
+        );
+
+      var message =
+        document.getElementById(
+          "message"
+        );
+
+      function showMessage(
+        text,
+        type
+      ) {
+        message.textContent = text;
+
+        message.className =
+          "message show " + type;
+      }
+
+      form.addEventListener(
+        "submit",
+        async function (event) {
+          event.preventDefault();
+
+          button.disabled = true;
+
+          button.textContent =
+            "PREPARANDO TU ACCESO…";
+
+          message.className =
+            "message";
+
+          try {
+            var response =
+              await fetch(
+                "/api/tribu-onboarding",
+                {
+                  method: "POST",
+
+                  headers: {
+                    "Content-Type":
+                      "application/json"
+                  },
+
+                  body:
+                    JSON.stringify({
+                      fullName:
+                        document
+                          .getElementById(
+                            "fullName"
+                          )
+                          .value
+                          .trim(),
+
+                      email:
+                        document
+                          .getElementById(
+                            "email"
+                          )
+                          .value
+                          .trim(),
+
+                      whatsapp:
+                        document
+                          .getElementById(
+                            "whatsapp"
+                          )
+                          .value
+                          .trim(),
+
+                      country:
+                        document
+                          .getElementById(
+                            "country"
+                          )
+                          .value
+                          .trim(),
+
+                      expectation:
+                        document
+                          .getElementById(
+                            "expectation"
+                          )
+                          .value
+                          .trim(),
+
+                      acceptedAgreements:
+                        document
+                          .getElementById(
+                            "agreements"
+                          )
+                          .checked,
+
+                      acceptedData:
+                        document
+                          .getElementById(
+                            "dataConsent"
+                          )
+                          .checked
+                    })
+                }
+              );
+
+            var data =
+              await response.json();
+
+            if (
+              response.ok &&
+              data.ok &&
+              data.tribeUrl
+            ) {
+              showMessage(
+                "¡Todo listo! Te estamos llevando a la Tribu 💜",
+                "success"
+              );
+
+              setTimeout(
+                function () {
+                  window.location.href =
+                    data.tribeUrl;
+                },
+                800
+              );
+
+              return;
+            }
+
+            if (
+              response.status === 404
+            ) {
+              showMessage(
+                "No encontramos una compra aprobada con ese correo. Verifica que sea el mismo utilizado en Hotmart.",
+                "error"
+              );
+            } else {
+              showMessage(
+                "No pudimos completar tu acceso. Revisa los datos e intenta nuevamente.",
+                "error"
+              );
+            }
+
+          } catch (error) {
+            showMessage(
+              "No pudimos conectar con el sistema. Intenta nuevamente.",
+              "error"
+            );
+          }
+
+          button.disabled = false;
+
+          button.textContent =
+            "CONTINUAR A MI TRIBU";
+        }
+      );
+    })();
+  </script>
+
+</body>
+</html>
