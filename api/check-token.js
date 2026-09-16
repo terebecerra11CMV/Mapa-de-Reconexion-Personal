@@ -17,6 +17,53 @@ function parseStored(value) {
   }
 }
 
+function getValidPersonalization(fullName, birthDate) {
+  if (
+    typeof fullName !== "string" ||
+    typeof birthDate !== "string"
+  ) {
+    return null;
+  }
+
+  const normalizedName = fullName.trim();
+  const normalizedBirthDate = birthDate.trim();
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(
+    normalizedBirthDate
+  );
+
+  if (normalizedName.length < 3 || !match) {
+    return null;
+  }
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+
+  if (
+    month < 1 ||
+    month > 12 ||
+    year < 1900 ||
+    year > new Date().getFullYear()
+  ) {
+    return null;
+  }
+
+  const daysInMonth = new Date(
+    year,
+    month,
+    0
+  ).getDate();
+
+  if (day < 1 || day > daysInMonth) {
+    return null;
+  }
+
+  return {
+    fullName: normalizedName,
+    birthDate: normalizedBirthDate
+  };
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
 
@@ -32,6 +79,8 @@ export default async function handler(req, res) {
   }
 
   try {
+    let purchase = null;
+
     /*
      * 1. Para los tokens creados por Hotmart,
      * exigimos que hayan sido emitidos realmente
@@ -59,7 +108,7 @@ export default async function handler(req, res) {
         access.purchaseKey
       );
 
-      const purchase = parseStored(purchaseRaw);
+      purchase = parseStored(purchaseRaw);
 
       if (!purchase) {
         return res.status(200).json({
@@ -68,46 +117,64 @@ export default async function handler(req, res) {
         });
       }
 
-      if (purchase.mapUsed === true) {
-        return res.status(200).json({
-          valid: false,
-          reason: "used"
-        });
-      }
     }
 
     /*
-     * 3. Candado nuevo.
-     * Usamos una llave independiente y SETNX
-     * para evitar un segundo canje.
+     * 3. Consultamos los dos registros de canje.
+     * Esta ruta es solo de lectura: SETNX sigue
+     * perteneciendo exclusivamente a redeem-token.
      */
-    const redeemed = await redis.get(
+    const redeemedRaw = await redis.get(
       `mapa-redeemed:${token}`
     );
 
-    if (redeemed) {
-      return res.status(200).json({
-        valid: false,
-        reason: "used"
-      });
-    }
-
-    /*
-     * 4. Compatibilidad con el mecanismo anterior.
-     */
-    const legacyUsed = await redis.get(
+    const legacyRaw = await redis.get(
       tokenKey(token)
     );
 
-    if (legacyUsed) {
+    const redeemed = parseStored(redeemedRaw);
+    const legacy = parseStored(legacyRaw);
+
+    const used = Boolean(
+      (purchase && purchase.mapUsed === true) ||
+      redeemedRaw ||
+      legacyRaw
+    );
+
+    if (used) {
+      const personalization =
+        (purchase && purchase.mapUsed === true &&
+          getValidPersonalization(
+            purchase.mapFullName,
+            purchase.mapBirthDate
+          )) ||
+        getValidPersonalization(
+          redeemed && redeemed.fullName,
+          redeemed && redeemed.birthDate
+        ) ||
+        getValidPersonalization(
+          legacy && legacy.fullName,
+          legacy && legacy.birthDate
+        );
+
+      if (personalization) {
+        return res.status(200).json({
+          valid: true,
+          mode: "existing",
+          fullName: personalization.fullName,
+          birthDate: personalization.birthDate
+        });
+      }
+
       return res.status(200).json({
         valid: false,
-        reason: "used"
+        reason: "used_unrecoverable"
       });
     }
 
     return res.status(200).json({
-      valid: true
+      valid: true,
+      mode: "new"
     });
 
   } catch (err) {

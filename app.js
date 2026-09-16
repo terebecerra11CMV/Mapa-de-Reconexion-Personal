@@ -48,6 +48,44 @@
     document.getElementById("formScreen").classList.remove("hidden");
   }
 
+  function showExistingMapNotice() {
+    var header = document.querySelector("#appScreen .app-header");
+    if (!header || document.getElementById("existingMapNotice")) return;
+
+    var notice = document.createElement("div");
+    notice.id = "existingMapNotice";
+    notice.className = "form-notice";
+    notice.style.maxWidth = "720px";
+    notice.style.margin = "18px auto 0";
+    notice.innerHTML =
+      "<strong>💜 Tu Mapa ya está guardado</strong><br>" +
+      "Este Mapa quedó asociado a tus datos personales. Puedes volver a utilizar este mismo enlace cuando quieras para consultar tu Mapa y descargar nuevamente tu PDF. Por seguridad, no compartas este enlace, ya que permite consultar tu Mapa personal.";
+    header.appendChild(notice);
+  }
+
+  function openExistingMap(data) {
+    var name = typeof data.fullName === "string" ? data.fullName.trim() : "";
+    var birthDate = typeof data.birthDate === "string" ? data.birthDate.trim() : "";
+    var parsed = parseDate(birthDate);
+
+    if (name.length < 3 || !parsed) {
+      showGate(
+        "No pudimos reabrir tu Mapa",
+        "Tu enlace ya fue utilizado, pero no encontramos datos completos y válidos para reconstruir tu Mapa. Contacta a terebecerra11@gmail.com o por WhatsApp al +52 871 111 4224."
+      );
+      return;
+    }
+
+    state.name = name;
+    state.day = parsed.day;
+    state.month = parsed.month;
+    state.year = parsed.year;
+    state.codes = computeCodes(parsed.day, parsed.month, parsed.year);
+
+    launchApp();
+    showExistingMapNotice();
+  }
+
   function initAccessGate() {
     var token = getTokenFromURL();
 
@@ -64,8 +102,15 @@
     fetch("/api/check-token?token=" + encodeURIComponent(token), { cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        if (data && data.valid) {
+        if (data && data.valid && data.mode === "existing") {
+          openExistingMap(data);
+        } else if (data && data.valid && data.mode === "new") {
           unlockForm();
+        } else if (data && data.reason === "used_unrecoverable") {
+          showGate(
+            "No pudimos reabrir tu Mapa",
+            "Tu enlace ya fue utilizado, pero no encontramos los datos originales necesarios para reconstruir tu Mapa. Contacta a terebecerra11@gmail.com o por WhatsApp al +52 871 111 4224."
+          );
         } else if (data && data.reason === "used") {
           showGate(
             "Este enlace ya fue utilizado",
@@ -590,6 +635,7 @@
      6. NAVEGACIÓN DE PESTAÑAS
      --------------------------------------------------------- */
   function launchApp() {
+    document.getElementById("gateScreen").classList.add("hidden");
     document.getElementById("formScreen").classList.add("hidden");
     var appScreen = document.getElementById("appScreen");
     appScreen.classList.remove("hidden");
