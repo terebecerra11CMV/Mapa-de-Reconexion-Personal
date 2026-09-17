@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { redis } from "./_redis.js";
+import { syncGoogleSheetsEvent } from "./_google-sheets.js";
 
 const MAP_BASE_URL =
   "https://mapa-de-reconexion-personal.vercel.app";
@@ -417,6 +418,27 @@ export default async function handler(
       `mapa-buyer:${email}`,
       purchaseKey
     );
+
+    await syncGoogleSheetsEvent({
+      event: "purchase_approved",
+      transaction:
+        record.transaction,
+      email:
+        record.buyerEmail,
+      firstName:
+        record.buyerFirstName,
+      lastName:
+        record.buyerLastName,
+      phone:
+        record.buyerPhone,
+      phoneCode:
+        record.buyerPhoneCode,
+      purchaseDate:
+        record.purchaseDate,
+      country: null,
+      tags:
+        "COMPRA APROBADA - MAPA DE RECONEXIÓN PERSONAL"
+    });
 
     /*
      * Entrega automática a Hotmart Send.
