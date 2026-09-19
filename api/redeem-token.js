@@ -2,6 +2,7 @@ import {
   redis,
   tokenKey
 } from "./_redis.js";
+import { syncGoogleSheetsEvent } from "./_google-sheets.js";
 
 function parseStored(value) {
   if (!value) return null;
@@ -323,6 +324,20 @@ export default async function handler(
         access.purchaseKey,
         JSON.stringify(purchase)
       );
+
+      await syncGoogleSheetsEvent({
+        event: "map_generated",
+        transaction:
+          purchase.transaction,
+        email:
+          purchase.buyerEmail,
+        fullName:
+          purchase.mapFullName,
+        birthDate:
+          purchase.mapBirthDate,
+        generatedAt:
+          purchase.mapUsedAt
+      });
 
       try {
         const syncResult =
