@@ -146,6 +146,208 @@ async function sendToHotmartSend(record) {
   };
 }
 
+function cartAbandonedAt(creationDate, fallback) {
+  if (
+    creationDate !== null &&
+    creationDate !== undefined &&
+    creationDate !== ""
+  ) {
+    const milliseconds =
+      Number(creationDate);
+
+    if (Number.isFinite(milliseconds)) {
+      const date = new Date(milliseconds);
+
+      if (!Number.isNaN(date.getTime())) {
+        return date.toISOString();
+      }
+    }
+  }
+
+  return fallback;
+}
+
+async function handleAbandonedCart(
+  body,
+  res
+) {
+  const data = body.data || {};
+  const product = data.product || {};
+  const buyer = data.buyer || {};
+  const offer = data.offer || {};
+  const checkoutCountry =
+    data.checkout_country || {};
+
+  const productId =
+    Number(product.id || 0);
+
+  if (productId !== REAL_PRODUCT_ID) {
+    return res.status(200).json({
+      ok: true,
+      ignored: true,
+      reason: "different_product",
+      productId
+    });
+  }
+
+  const eventId = (body.id || "")
+    .toString()
+    .trim();
+
+  if (!eventId) {
+    return res.status(400).json({
+      ok: false,
+      reason: "missing_event_id"
+    });
+  }
+
+  const email =
+    normalizeEmail(buyer.email);
+
+  const phone = (buyer.phone || "")
+    .toString()
+    .trim();
+
+  const cartKey =
+    `hotmart-cart:${eventId}`;
+
+  try {
+    const existingRaw =
+      await redis.get(cartKey);
+
+    const existing =
+      parseStored(existingRaw);
+
+    const now =
+      new Date().toISOString();
+
+    const record = {
+      eventId,
+      productId,
+      productName:
+        product.name || null,
+      buyerName:
+        buyer.name || null,
+      buyerEmail:
+        email || null,
+      buyerPhone:
+        phone || null,
+      offerCode:
+        offer.code || null,
+      countryName:
+        checkoutCountry.name || null,
+      countryIso:
+        checkoutCountry.iso || null,
+      affiliate:
+        data.affiliate || null,
+      abandonedAt:
+        cartAbandonedAt(
+          body.creation_date,
+          now
+        ),
+      createdAt:
+        (existing && existing.createdAt) ||
+        now,
+      googleSheetsSync: null,
+      googleSheetsSyncedAt: null
+    };
+
+    if (!email && !phone) {
+      record.googleSheetsSync = {
+        attempted: false,
+        ok: false,
+        reason: "missing_contact"
+      };
+
+      await redis.set(
+        cartKey,
+        JSON.stringify(record)
+      );
+
+      return res.status(200).json({
+        ok: true,
+        ignored: true,
+        reason: "missing_contact"
+      });
+    }
+
+    await redis.set(
+      cartKey,
+      JSON.stringify(record)
+    );
+
+    let syncResult;
+
+    try {
+      syncResult =
+        await syncGoogleSheetsEvent({
+          event: "cart_abandoned",
+          eventId,
+          email: email || null,
+          fullName:
+            record.buyerName,
+          phone: phone || null,
+          productId,
+          productName:
+            record.productName,
+          offerCode:
+            record.offerCode,
+          country:
+            record.countryIso ||
+            record.countryName,
+          affiliate:
+            record.affiliate,
+          abandonedAt:
+            record.abandonedAt
+        });
+    } catch (syncError) {
+      console.error(
+        "[hotmart-webhook-live] Google Sheets cart sync:",
+        syncError
+      );
+
+      syncResult = {
+        ok: false,
+        configured: true,
+        reason:
+          "google_sheets_unexpected_error"
+      };
+    }
+
+    record.googleSheetsSync = {
+      attempted: true,
+      ...syncResult
+    };
+    record.googleSheetsSyncedAt =
+      new Date().toISOString();
+
+    await redis.set(
+      cartKey,
+      JSON.stringify(record)
+    );
+
+    return res.status(200).json({
+      ok: true,
+      event:
+        "cart_abandoned",
+      duplicate:
+        Boolean(existingRaw),
+      sheetsSynced:
+        Boolean(syncResult.ok)
+    });
+  } catch (error) {
+    console.error(
+      "[hotmart-webhook-live] abandoned cart:",
+      error
+    );
+
+    return res.status(500).json({
+      ok: false,
+      reason: "internal_error"
+    });
+  }
+}
+
 export default async function handler(
   req,
   res
@@ -180,6 +382,16 @@ export default async function handler(
   }
 
   const body = parseBody(req);
+
+  if (
+    body.event ===
+    "PURCHASE_OUT_OF_SHOPPING_CART"
+  ) {
+    return handleAbandonedCart(
+      body,
+      res
+    );
+  }
 
   if (
     body.event !== "PURCHASE_APPROVED"
@@ -435,7 +647,15 @@ export default async function handler(
         record.buyerPhoneCode,
       purchaseDate:
         record.purchaseDate,
-      country: null,
+      productId:
+        record.productId,
+      productName:
+        record.productName,
+      country:
+        (data.checkout_country &&
+          (data.checkout_country.iso ||
+            data.checkout_country.name)) ||
+        null,
       tags:
         "COMPRA APROBADA - MAPA DE RECONEXIÓN PERSONAL"
     });
