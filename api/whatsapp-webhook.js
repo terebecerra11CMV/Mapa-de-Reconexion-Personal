@@ -12,10 +12,15 @@ function parseBody(req) {
   return req.body;
 }
 
+function normalizePhone(value) {
+  return (value || "")
+    .toString()
+    .replace(/\D/g, "");
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
 
-  // VERIFICACIÓN DE META
   if (req.method === "GET") {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
@@ -34,7 +39,6 @@ export default async function handler(req, res) {
     return res.status(403).send("Forbidden");
   }
 
-  // MENSAJES ENTRANTES
   if (req.method === "POST") {
     const body = parseBody(req);
 
@@ -45,20 +49,66 @@ export default async function handler(req, res) {
         const changes = entry.changes || [];
 
         for (const change of changes) {
+          const value = change.value || {};
+          const messages = value.messages || [];
+          const statuses = value.statuses || [];
+
+          console.log(
+            "[WA] event",
+            JSON.stringify({
+              field: change.field || null,
+              entryId: entry.id || null,
+              phoneNumberId:
+                value.metadata?.phone_number_id || null,
+              messages: messages.length,
+              statuses: statuses.length,
+            })
+          );
+
           if (change.field !== "messages") {
             continue;
           }
 
-          const value = change.value || {};
-          const messages = value.messages || [];
-
           for (const message of messages) {
-            const from = message.from;
+            const from =
+              normalizePhone(message.from);
 
-            // Solo nuestra prueba personal
+            const expectedRecipient =
+              normalizePhone(
+                process.env.WHATSAPP_TEST_RECIPIENT
+              );
+
+            const accessToken =
+              process.env.WHATSAPP_ACCESS_TOKEN;
+
+            const phoneNumberId =
+              process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+            console.log(
+              "[WA] incoming",
+              JSON.stringify({
+                type: message.type || null,
+                fromLast4: from.slice(-4),
+                expectedLast4:
+                  expectedRecipient.slice(-4),
+                recipientMatches:
+                  Boolean(from) &&
+                  from === expectedRecipient,
+                accessTokenConfigured:
+                  Boolean(accessToken),
+                phoneNumberIdConfigured:
+                  Boolean(phoneNumberId),
+                receivedPhoneNumberId:
+                  value.metadata?.phone_number_id || null,
+                configuredPhoneNumberId:
+                  phoneNumberId || null,
+              })
+            );
+
             if (
-              from !==
-              process.env.WHATSAPP_TEST_RECIPIENT
+              !from ||
+              !expectedRecipient ||
+              from !== expectedRecipient
             ) {
               continue;
             }
@@ -67,43 +117,30 @@ export default async function handler(req, res) {
               continue;
             }
 
-            const accessToken =
-              process.env.WHATSAPP_ACCESS_TOKEN;
-
-            const phoneNumberId =
-              process.env.WHATSAPP_PHONE_NUMBER_ID;
-
             if (!accessToken || !phoneNumberId) {
               console.error(
-                "WhatsApp credentials missing"
+                "[WA] credentials missing"
               );
               continue;
             }
 
             const response = await fetch(
-              `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
+              `https://graph.facebook.com/v26.0/${phoneNumberId}/messages`,
               {
                 method: "POST",
 
                 headers: {
                   Authorization:
                     `Bearer ${accessToken}`,
-
                   "Content-Type":
                     "application/json",
                 },
 
                 body: JSON.stringify({
-                  messaging_product:
-                    "whatsapp",
-
-                  recipient_type:
-                    "individual",
-
+                  messaging_product: "whatsapp",
+                  recipient_type: "individual",
                   to: from,
-
                   type: "text",
-
                   text: {
                     body:
                       "Hola Harold 👋 Automatización de WhatsApp funcionando ✅",
@@ -114,8 +151,13 @@ export default async function handler(req, res) {
 
             if (!response.ok) {
               console.error(
-                "WhatsApp send error:",
+                "[WA] send error",
+                response.status,
                 await response.text()
+              );
+            } else {
+              console.log(
+                "[WA] reply sent"
               );
             }
           }
@@ -127,12 +169,10 @@ export default async function handler(req, res) {
       });
     } catch (error) {
       console.error(
-        "WhatsApp webhook error:",
+        "[WA] webhook error",
         error
       );
 
-      // Respondemos 200 para evitar
-      // reintentos infinitos durante pruebas.
       return res.status(200).json({
         ok: false,
       });
