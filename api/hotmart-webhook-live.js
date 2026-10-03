@@ -1,11 +1,13 @@
 import { createHash } from "crypto";
 import { redis } from "./_redis.js";
 import { syncGoogleSheetsEvent } from "./_google-sheets.js";
+import { deliverWhatsApp, validHotmartToken } from "./_whatsapp.js";
 
 const MAP_BASE_URL =
   "https://mapa-de-reconexion-personal.vercel.app";
 
 const REAL_PRODUCT_ID = 8258558;
+const HOTMART_SEND_TIMEOUT_MS = 8000;
 
 function parseBody(req) {
   if (!req.body) return {};
@@ -91,52 +93,65 @@ async function sendToHotmartSend(record) {
     };
   }
 
-  const response = await fetch(
-    sendUrl,
-    {
-      method: "POST",
-
-      headers: {
-        "Content-Type":
-          "application/json",
-      },
-
-      body: JSON.stringify({
-        email:
-          record.buyerEmail,
-
-        hottok:
-          sendHottok,
-
-        first_name:
-          record.buyerFirstName ||
-          record.buyerName ||
-          "",
-
-        last_name:
-          record.buyerLastName ||
-          "",
-
-        /*
-         * ESTE es el enlace individual
-         * que luego Hotmart Send inserta
-         * como %Subscriber:website%.
-         */
-        website:
-          record.accessUrl,
-      }),
-    }
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    HOTMART_SEND_TIMEOUT_MS
   );
+  let response;
+
+  try {
+    response = await fetch(
+      sendUrl,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+
+        body: JSON.stringify({
+          email:
+            record.buyerEmail,
+
+          hottok:
+            sendHottok,
+
+          first_name:
+            record.buyerFirstName ||
+            record.buyerName ||
+            "",
+
+          last_name:
+            record.buyerLastName ||
+            "",
+
+          /*
+           * ESTE es el enlace individual
+           * que luego Hotmart Send inserta
+           * como %Subscriber:website%.
+           */
+          website:
+            record.accessUrl,
+        }),
+        signal: controller.signal,
+      }
+    );
+  } catch (error) {
+    throw new Error(
+      error && error.name === "AbortError"
+        ? "hotmart_send_timeout"
+        : "hotmart_send_request_failed"
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!response.ok) {
-    const responseText =
-      await response.text();
-
     throw new Error(
-      "Hotmart Send HTTP " +
-      response.status +
-      " " +
-      responseText
+      "hotmart_send_http_" +
+      response.status
     );
   }
 
@@ -381,6 +396,13 @@ export default async function handler(
     });
   }
 
+  // Validate the real Hotmart webhook secret when configured.
+  // The WhatsApp sender stays disabled until this secret exists.
+  const expectedHottok = (process.env.HOTMART_WEBHOOK_HOTTOK || "").trim();
+  if (expectedHottok && !validHotmartToken(hottokHeader, expectedHottok)) {
+    return res.status(401).json({ ok: false, reason: "invalid_hotmart_hottok" });
+  }
+
   const body = parseBody(req);
 
   if (
@@ -426,6 +448,17 @@ export default async function handler(
     productId === 0 &&
     product.name ===
       "Produto test postback2";
+
+  const webhookEventId = (body.id || "")
+    .toString()
+    .trim();
+
+  if (isHotmartTest && !webhookEventId) {
+    return res.status(400).json({
+      ok: false,
+      reason: "missing_event_id",
+    });
+  }
 
   if (
     productId !== REAL_PRODUCT_ID &&
@@ -492,17 +525,12 @@ export default async function handler(
      */
     const seed =
       isHotmartTest
-        ? `${transaction}:${body.id || Date.now()}`
+        ? `${transaction}:${webhookEventId}`
         : transaction;
 
     const purchaseKey =
       isHotmartTest
-        ? `hotmart-test-live:${
-            body.id ||
-            createHash("sha1")
-              .update(seed)
-              .digest("hex")
-          }`
+        ? `hotmart-test-live:${webhookEventId}`
         : `hotmart-purchase:${transaction}`;
 
     const existingRaw =
@@ -537,6 +565,10 @@ export default async function handler(
 
         webhookEventId:
           body.id || null,
+
+        whatsappEligible:
+          process.env.WHATSAPP_ENABLED ===
+          "true",
 
         event:
           body.event,
@@ -666,6 +698,7 @@ export default async function handler(
      * Si ya se entregó antes,
      * NO mandamos un segundo email.
      */
+    let hotmartSendFailed = false;
     if (!record.sendDeliveredAt) {
       try {
         const sendResult =
@@ -716,8 +749,8 @@ export default async function handler(
         );
 
         console.error(
-          "[hotmart-webhook-live] Hotmart Send:",
-          sendError
+          "[hotmart-webhook-live] Hotmart Send failed:",
+          record.sendLastError
         );
 
         /*
@@ -725,19 +758,42 @@ export default async function handler(
          * compra real no quede silenciosamente
          * sin intentar entregar nuevamente.
          */
-        return res.status(502).json({
-          ok: false,
-          reason:
-            "hotmart_send_failed",
-          transaction,
-          accessUrl:
-            record.accessUrl,
-        });
+        hotmartSendFailed = true;
       }
+    }
+
+    let whatsappResult;
+    try {
+      whatsappResult = await deliverWhatsApp(record, purchaseKey, {
+        redis, buyer,
+        country: data.checkout_country?.iso || buyer.address?.country_iso || "",
+        eligible: record.whatsappEligible === true
+      });
+    } catch {
+      // Redis uncertainty never causes an untracked second message.
+      console.error("[hotmart-webhook-live] WhatsApp state unavailable");
+      whatsappResult = { status: "state_unavailable", retry: true };
+    }
+
+    if (hotmartSendFailed) {
+      return res.status(502).json({
+        ok: false, reason: "hotmart_send_failed", transaction,
+        accessUrl: record.accessUrl, whatsappStatus: whatsappResult.status
+      });
+    }
+    if (whatsappResult.retry) {
+      // Hotmart may replay the same transaction. Email and accepted WhatsApp
+      // messages remain deduplicated. Explicit 429 failures may be retried.
+      return res.status(503).json({
+        ok: false, reason: "whatsapp_retry_required", transaction,
+        sendStatus: record.sendStatus, whatsappStatus: whatsappResult.status
+      });
     }
 
     return res.status(200).json({
       ok: true,
+      whatsappStatus: whatsappResult.status,
+      whatsappMessageId: whatsappResult.messageId || null,
 
       test:
         isHotmartTest,
