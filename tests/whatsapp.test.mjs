@@ -132,9 +132,17 @@ test("Meta rejection, missing wamid and 5xx are not reported as delivered", asyn
 test("official Hotmart tests require an explicit controlled recipient", async () => {
   const opts = { redis: storage(), buyer, env, fetchImpl: () => { throw Error("must not send"); } };
   assert.equal((await deliverWhatsApp({ ...record, test: true }, "test", opts)).status, "test_skipped");
-  opts.env = { ...env, WHATSAPP_TEST_RECIPIENT: "+573001234567" };
-  opts.fetchImpl = async (_url, req) => { assert.equal(JSON.parse(req.body).to, "573001234567"); return accepted(); };
+  const recipients = [];
+  opts.env = { ...env, WHATSAPP_TEST_RECIPIENT: "+573119999999" };
+  opts.fetchImpl = async (_url, req) => {
+    recipients.push(JSON.parse(req.body).to);
+    return accepted();
+  };
   assert.equal((await deliverWhatsApp({ ...record, test: true }, "controlled-test", opts)).status, "accepted");
+  assert.equal((await deliverWhatsApp(record, "real-purchase", {
+    ...opts, redis: storage()
+  })).status, "accepted");
+  assert.deepEqual(recipients, ["573119999999", "573001234567"]);
 });
 
 test("webhook: preserve email/access, send WhatsApp once, isolate Meta failures and reject wrong Hottok", async () => {
@@ -164,7 +172,8 @@ test("webhook: preserve email/access, send WhatsApp once, isolate Meta failures 
           ? { id: 0, name: "Produto test postback2" }
           : { id: options.productId ?? 8258558 },
         purchase: { transaction, status: options.purchaseStatus || "APPROVED" },
-        buyer: { ...buyer, email: "fixture@example.invalid", first_name: "María" }, checkout_country: { iso: "CO" }
+        buyer: options.buyer || { ...buyer, email: "fixture@example.invalid", first_name: "María" },
+        checkout_country: { iso: "CO" }
       }
     } };
     const res = { setHeader() {}, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } };
@@ -180,6 +189,9 @@ test("webhook: preserve email/access, send WhatsApp once, isolate Meta failures 
     assert.equal((await call("other-product", "fixture-hottok", {
       productId: 123
     })).body.reason, "different_product");
+    assert.equal((await call("other-event", "fixture-hottok", {
+      event: "PURCHASE_REFUNDED"
+    })).body.ignored, true);
     assert.equal(emails, 0); assert.equal(whatsapps, 0);
     const first = await call("one");
     assert.equal(first.code, 200); assert.equal(first.body.whatsappStatus, "accepted");
@@ -189,8 +201,18 @@ test("webhook: preserve email/access, send WhatsApp once, isolate Meta failures 
     assert.ok(redis.values.has("mapa-access:" + first.body.token));
     assert.equal(JSON.parse(redis.values.get("hotmart-purchase:one")).whatsappStatus, undefined);
     assert.ok(redis.values.has("whatsapp-delivery:hotmart-purchase:one"));
+    const beforeMissingPhoneEmails = emails;
+    const beforeMissingPhoneWhatsApps = whatsapps;
+    const missingPhone = await call("missing-phone", "fixture-hottok", {
+      buyer: { email: "fixture@example.invalid", first_name: "María" }
+    });
+    assert.equal(missingPhone.code, 200);
+    assert.equal(missingPhone.body.sendStatus, "delivered_to_hotmart_send");
+    assert.equal(missingPhone.body.whatsappStatus, "missing_or_invalid_phone");
+    assert.equal(emails, beforeMissingPhoneEmails + 1);
+    assert.equal(whatsapps, beforeMissingPhoneWhatsApps);
     assert.equal((await call("wrong", "bad-token")).code, 401);
-    assert.equal(whatsapps, 1);
+    assert.equal(whatsapps, beforeMissingPhoneWhatsApps);
     redis.values.set("hotmart-purchase:legacy", JSON.stringify({
       token: "hm-legacy", accessUrl: "https://mapa-de-reconexion-personal.vercel.app/?token=hm-legacy",
       transaction: "legacy", buyerEmail: "fixture@example.invalid", sendDeliveredAt: "2026-01-01T00:00:00.000Z",
@@ -198,7 +220,7 @@ test("webhook: preserve email/access, send WhatsApp once, isolate Meta failures 
     }));
     const legacy = await call("legacy");
     assert.equal(legacy.body.whatsappStatus, "historical_skipped");
-    assert.equal(whatsapps, 1);
+    assert.equal(whatsapps, beforeMissingPhoneWhatsApps);
     metaFails = true;
     const metaRejected = await call("two");
     assert.equal(metaRejected.code, 200); assert.equal(metaRejected.body.sendStatus, "delivered_to_hotmart_send");
