@@ -53,6 +53,21 @@ export default async function handler(req, res) {
           const messages = value.messages || [];
           const statuses = value.statuses || [];
 
+          for (const status of statuses) {
+  console.log("[WA] delivery status", JSON.stringify({
+    id: status.id,
+    status: status.status,
+    timestamp: status.timestamp,
+    recipientLast4: normalizePhone(status.recipient_id).slice(-4),
+    errors: (status.errors || []).map(error => ({
+      code: error.code,
+      title: error.title,
+      message: error.message,
+      details: error.error_data?.details
+    }))
+  }));
+}
+
           console.log(
             "[WA] event",
             JSON.stringify({
