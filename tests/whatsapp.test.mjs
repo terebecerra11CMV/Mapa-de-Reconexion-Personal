@@ -157,19 +157,26 @@ test("webhook: preserve email/access, send WhatsApp once, isolate Meta failures 
   const previousEnv = { ...process.env }, previousFetch = globalThis.fetch;
   const previousConsoleError = console.error;
   let emails = 0, whatsapps = 0, emailFails = false, metaFails = false;
-  Object.assign(process.env, env, { HOTMART_SEND_URL: "https://send.example.invalid", HOTMART_SEND_HOTTOK: "send-fixture" });
-  globalThis.fetch = async (url) => {
+  const whatsappRecipients = [];
+  Object.assign(process.env, env, {
+    HOTMART_SEND_URL: "https://send.example.invalid",
+    HOTMART_SEND_HOTTOK: "send-fixture",
+    WHATSAPP_TEST_RECIPIENT: "+573119999999"
+  });
+  globalThis.fetch = async (url, request) => {
     if (url === "https://send.example.invalid") {
       emails++; return { ok: !emailFails, status: 503, text: async () => "fixture failure" };
     }
-    whatsapps++; return metaFails ? reply(400, { error: { code: 132000 } }) : accepted();
+    whatsapps++;
+    whatsappRecipients.push(JSON.parse(request.body).to);
+    return metaFails ? reply(400, { error: { code: 132000 } }) : accepted();
   };
   const call = async (transaction, token = "fixture-hottok", options = {}) => {
     const req = { method: "POST", headers: { "x-hotmart-hottok": token }, body: {
       id: options.omitEventId ? undefined : "event-" + transaction,
       event: options.event || "PURCHASE_APPROVED", data: {
         product: options.officialTest
-          ? { id: 0, name: "Produto test postback2" }
+          ? { id: 0, name: options.productName || "Produto test postback2" }
           : { id: options.productId ?? 8258558 },
         purchase: { transaction, status: options.purchaseStatus || "APPROVED" },
         buyer: options.buyer || { ...buyer, email: "fixture@example.invalid", first_name: "María" },
@@ -181,7 +188,8 @@ test("webhook: preserve email/access, send WhatsApp once, isolate Meta failures 
   };
   try {
     assert.equal((await call("missing-id", "fixture-hottok", {
-      officialTest: true, omitEventId: true
+      officialTest: true, omitEventId: true,
+      productName: "Producto de prueba localizado"
     })).code, 400);
     assert.equal((await call("pending", "fixture-hottok", {
       purchaseStatus: "PENDING"
@@ -193,6 +201,15 @@ test("webhook: preserve email/access, send WhatsApp once, isolate Meta failures 
       event: "PURCHASE_REFUNDED"
     })).body.ignored, true);
     assert.equal(emails, 0); assert.equal(whatsapps, 0);
+    const localizedTest = await call("localized-test", "fixture-hottok", {
+      officialTest: true,
+      productName: "Producto de prueba localizado"
+    });
+    assert.equal(localizedTest.code, 200);
+    assert.equal(localizedTest.body.test, true);
+    assert.ok(redis.values.has("hotmart-test-live:event-localized-test"));
+    assert.deepEqual(whatsappRecipients, ["573119999999"]);
+    emails = 0; whatsapps = 0; whatsappRecipients.length = 0;
     const first = await call("one");
     assert.equal(first.code, 200); assert.equal(first.body.whatsappStatus, "accepted");
     const again = await call("one");

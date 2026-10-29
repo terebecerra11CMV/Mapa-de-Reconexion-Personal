@@ -405,6 +405,16 @@ export default async function handler(
 
   const body = parseBody(req);
 
+  console.log(
+    "[hotmart-webhook-live] received",
+    JSON.stringify({
+      event: body.event || null,
+      eventId: body.id || null,
+      productId: Number(body.data?.product?.id || 0),
+      productName: body.data?.product?.name || null
+    })
+  );
+
   if (
     body.event ===
     "PURCHASE_OUT_OF_SHOPPING_CART"
@@ -444,10 +454,7 @@ export default async function handler(
    * Hotmart usa product.id = 0
    * en su payload oficial de prueba.
    */
-  const isHotmartTest =
-    productId === 0 &&
-    product.name ===
-      "Produto test postback2";
+  const isHotmartTest = productId === 0;
 
   const webhookEventId = (body.id || "")
     .toString()
@@ -789,6 +796,18 @@ export default async function handler(
         sendStatus: record.sendStatus, whatsappStatus: whatsappResult.status
       });
     }
+
+    console.log(
+      "[hotmart-webhook-live] completed",
+      JSON.stringify({
+        test: isHotmartTest,
+        duplicate: Boolean(existingRaw),
+        transactionSuffix: transaction.slice(-6),
+        sendStatus: record.sendStatus,
+        whatsappStatus: whatsappResult.status,
+        whatsappMessageId: whatsappResult.messageId || null
+      })
+    );
 
     return res.status(200).json({
       ok: true,
