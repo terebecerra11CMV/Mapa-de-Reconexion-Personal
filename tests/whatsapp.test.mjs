@@ -5,7 +5,7 @@ import { deliverWhatsApp, normalizeBuyerPhone, templatePayload, validHotmartToke
 
 const env = {
   WHATSAPP_ENABLED: "true", WHATSAPP_ACCESS_TOKEN: "fixture-not-a-secret",
-  WHATSAPP_PHONE_NUMBER_ID: "1252348971306240", WHATSAPP_TEMPLATE_NAME: "entrega_mapa_reconexion",
+  WHATSAPP_PHONE_NUMBER_ID: "1252348971306240", WHATSAPP_TEMPLATE_NAME: "entrega_mapa_reconexion_v2",
   WHATSAPP_TEMPLATE_LANGUAGE: "es_MX", WHATSAPP_GRAPH_API_VERSION: "v25.0",
   HOTMART_WEBHOOK_HOTTOK: "fixture-hottok"
 };
@@ -46,14 +46,23 @@ test("Hotmart phone normalization: MX, CO, Brazil DDD, international, ambiguous"
   assert.equal(normalizeBuyerPhone({ checkout_phone: "+00000" }), null);
   assert.equal(normalizeBuyerPhone({ checkout_phone: "57+3001234567" }), null);
 });
-test("exact template body and dynamic suffix (not full URL)", () => {
+test("one template contains video header, body name and dynamic map button", () => {
   const payload = templatePayload(record, "573001234567", env);
-  assert.equal(payload.template.name, "entrega_mapa_reconexion");
+  assert.equal(payload.type, "template");
+  assert.equal(payload.template.name, "entrega_mapa_reconexion_v2");
   assert.equal(payload.template.language.code, "es_MX");
   assert.deepEqual(payload.template.components, [
+    { type: "header", parameters: [{ type: "video", video: {
+      link: "https://mapa-de-reconexion-personal.vercel.app/video-bienvenida-tere.mp4"
+    } }] },
     { type: "body", parameters: [{ type: "text", text: "María" }] },
     { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: "hm-fixture" }] }
   ]);
+  const overridden = templatePayload(record, "573001234567", {
+    ...env, WHATSAPP_TEMPLATE_VIDEO_URL: "https://cdn.example.invalid/welcome.mp4"
+  });
+  assert.equal(overridden.template.components[0].parameters[0].video.link,
+    "https://cdn.example.invalid/welcome.mp4");
 });
 test("Hottok requires an exact nonempty match", () => {
   assert.equal(validHotmartToken("fixture-hottok", env.HOTMART_WEBHOOK_HOTTOK), true);
@@ -90,7 +99,11 @@ test("accepted send stores wamid; sequential duplicates do not resend", async ()
   const redis = storage();
   const fetchImpl = async (url, opts) => {
     calls++; assert.equal(url, "https://graph.facebook.com/v25.0/1252348971306240/messages");
-    assert.equal(JSON.parse(opts.body).template.components[1].parameters[0].text, "hm-fixture");
+    const payload = JSON.parse(opts.body);
+    assert.equal(payload.type, "template");
+    assert.equal(payload.template.components[0].type, "header");
+    assert.equal(payload.template.components[1].parameters[0].text, "María");
+    assert.equal(payload.template.components[2].parameters[0].text, "hm-fixture");
     return accepted();
   };
   const opts = { redis, buyer, env, fetchImpl };
@@ -128,6 +141,45 @@ test("Meta rejection, missing wamid and 5xx are not reported as delivered", asyn
     [reply(200, {}), "unknown"],
     [reply(503, {}), "unknown"]
   ]) assert.equal((await deliverWhatsApp(record, "purchase", { redis: storage(), buyer, env, fetchImpl: async () => response })).status, status);
+});
+test("Meta rejection log contains only sanitized error fields", async () => {
+  const previousConsoleError = console.error;
+  const logged = [];
+  console.error = (...args) => logged.push(args);
+  try {
+    const response = reply(400, {
+      error: {
+        code: 132000,
+        error_subcode: 2494010,
+        type: "OAuthException",
+        message: "Template parameter mismatch",
+        error_data: { details: "header: expected video" },
+        access_token: "must-not-be-logged"
+      },
+      request_body: { to: "573001234567", token: "hm-fixture" }
+    });
+    const result = await deliverWhatsApp(record, "sanitized-error", {
+      redis: storage(), buyer, env, fetchImpl: async () => response
+    });
+    assert.equal(result.status, "failed");
+    assert.equal(logged.length, 1);
+    assert.equal(logged[0][0], "[whatsapp] Meta rejected template");
+    assert.deepEqual(JSON.parse(logged[0][1]), {
+      httpStatus: 400,
+      errorCode: 132000,
+      errorSubcode: 2494010,
+      errorType: "OAuthException",
+      errorMessage: "Template parameter mismatch",
+      errorDetails: "header: expected video"
+    });
+    const serialized = JSON.stringify(logged);
+    for (const secret of ["must-not-be-logged", "573001234567", "hm-fixture",
+      "fixture-not-a-secret", "fixture-hottok"]) {
+      assert.equal(serialized.includes(secret), false);
+    }
+  } finally {
+    console.error = previousConsoleError;
+  }
 });
 test("official Hotmart tests require an explicit controlled recipient", async () => {
   const opts = { redis: storage(), buyer, env, fetchImpl: () => { throw Error("must not send"); } };

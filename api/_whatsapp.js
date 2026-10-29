@@ -3,6 +3,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 const value = (env, name) => String(env[name] || "").trim();
 const parse = (raw) => typeof raw === "string" ? JSON.parse(raw) : raw;
 const metaCode = (raw) => Number.isSafeInteger(raw) ? raw : null;
+const metaText = (raw) => typeof raw === "string" ? raw.slice(0, 1000) : null;
 
 export function validHotmartToken(received, expected) {
   const a = Buffer.from(String(received || ""));
@@ -39,6 +40,9 @@ export function normalizeBuyerPhone(buyer, country = "") {
 export function templatePayload(record, phone, env = process.env) {
   const name = String(record.buyerFirstName || record.buyerName || "cliente")
     .replace(/\s+/g, " ").trim().slice(0, 100) || "cliente";
+  const videoUrl =
+    value(env, "WHATSAPP_TEMPLATE_VIDEO_URL") ||
+    "https://mapa-de-reconexion-personal.vercel.app/video-bienvenida-tere.mp4";
   return {
     messaging_product: "whatsapp",
     recipient_type: "individual",
@@ -48,6 +52,15 @@ export function templatePayload(record, phone, env = process.env) {
       name: value(env, "WHATSAPP_TEMPLATE_NAME"),
       language: { code: value(env, "WHATSAPP_TEMPLATE_LANGUAGE") },
       components: [
+        {
+          type: "header",
+          parameters: [
+            {
+              type: "video",
+              video: { link: videoUrl }
+            }
+          ]
+        },
         { type: "body", parameters: [{ type: "text", text: name }] },
         { type: "button", sub_type: "url", index: "0",
           parameters: [{ type: "text", text: record.token }] }
@@ -158,6 +171,16 @@ export async function deliverWhatsApp(record, purchaseKey, {
     });
     let data = null;
     try { data = await response.json(); } catch { /* Do not log raw responses. */ }
+    if (!response.ok) {
+      console.error("[whatsapp] Meta rejected template", JSON.stringify({
+        httpStatus: response.status,
+        errorCode: metaCode(data?.error?.code),
+        errorSubcode: metaCode(data?.error?.error_subcode),
+        errorType: metaText(data?.error?.type),
+        errorMessage: metaText(data?.error?.message),
+        errorDetails: metaText(data?.error?.error_data?.details)
+      }));
+    }
     const messageId = typeof data?.messages?.[0]?.id === "string"
       ? data.messages[0].id.slice(0, 512) : null;
     if (response.ok && messageId) {
